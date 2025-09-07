@@ -1,43 +1,30 @@
+import os
 import streamlit as st
 import pandas as pd
 import gdown
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import linear_kernel, cosine_similarity
 from scipy.sparse import csr_matrix
-import os
-os.environ["STREAMLIT_WATCHDOG"] = "false"
 
+# Disable watchdog inotify issue
+os.environ["STREAMLIT_WATCHDOG"] = "false"
 
 # --- Load Data ---
 @st.cache_data
 def load_metadata():
-    try:
-        df = pd.read_csv("gamedata.csv", low_memory=False)
-        return df
-    except Exception as e:
-        st.error(f"Error loading gamedata.csv: {e}")
-        return pd.DataFrame()
+    return pd.read_csv("gamedata.csv", low_memory=False)
 
 @st.cache_data
 def load_ratings():
-    try:
-        url = "https://drive.google.com/uc?id=1V_woBuQTiOTxj0OjH0Mx-UhyOY7l14Fg"  # Google Drive file ID
-        output = "n_ratings.csv"
-        gdown.download(url, output, quiet=False, use_cookies=False)
-        df = pd.read_csv(output)
-        return df
-    except Exception as e:
-        st.error(f"Error downloading or loading ratings: {e}")
-        return pd.DataFrame()
+    url = "https://drive.google.com/uc?id=1V_woBuQTiOTxj0OjH0Mx-UhyOY7l14Fg"  # Google Drive file
+    output = "n_ratings.csv"
+    gdown.download(url, output, quiet=False, use_cookies=False)
+    return pd.read_csv(output)
 
 @st.cache_data
 def load_users():
-    try:
-        df = pd.read_csv("steamuser.csv")
-        return df
-    except Exception as e:
-        st.error(f"Error loading steamuser.csv: {e}")
-        return pd.DataFrame()
+    return pd.read_csv("steamuser.csv")
+
 
 # --- Content-Based Filtering ---
 def combine_features(row, fields_to_include):
@@ -59,6 +46,7 @@ def combine_features(row, fields_to_include):
     if 'steamspy_tags' in fields_to_include:
         features.append(row['steamspy_tags'])
     return " ".join(features)
+
 
 def get_content_based_recommendations(metadata, **filters):
     filtered_metadata = metadata.copy()
@@ -132,21 +120,28 @@ def main():
     ratings_df = load_ratings()
     users_df = load_users()
 
-    # Normalize column names
-    metadata.columns = metadata.columns.str.strip()
-    ratings_df.columns = ratings_df.columns.str.strip()
-    users_df.columns = users_df.columns.str.strip()
+    # Normalize all columns
+    metadata.columns = metadata.columns.str.strip().str.lower()
+    ratings_df.columns = ratings_df.columns.str.strip().str.lower()
+    users_df.columns = users_df.columns.str.strip().str.lower()
+
+    # Debug: show columns
+    with st.expander("📊 Debug: Show loaded columns"):
+        st.write("Metadata columns:", metadata.columns.tolist())
+        st.write("Ratings columns:", ratings_df.columns.tolist())
+        st.write("Users columns:", users_df.columns.tolist())
 
     # Preprocess metadata
     for col in ['short_description', 'developer', 'publisher', 'platforms', 'required_age', 'categories', 'genres', 'steamspy_tags', 'detailed_description', 'about_the_game']:
-        metadata[col] = metadata[col].fillna('')
+        if col in metadata.columns:
+            metadata[col] = metadata[col].fillna('')
     fields_to_include = ['description', 'genres', 'developer', 'publisher', 'platforms', 'required_age', 'steamspy_tags']
     metadata['combined_features'] = metadata.apply(lambda row: combine_features(row, fields_to_include), axis=1)
 
     # Preprocess for collaborative filtering
     merged_df = pd.merge(ratings_df, metadata, on="appid")
-    merged_df = pd.merge(merged_df, users_df, on="userID")
-    user_item_matrix = merged_df.pivot_table(index="userID", columns="appid", values="rating").fillna(0)
+    merged_df = pd.merge(merged_df, users_df, on="userid")
+    user_item_matrix = merged_df.pivot_table(index="userid", columns="appid", values="rating").fillna(0)
     user_item_sparse_matrix = csr_matrix(user_item_matrix.values)
 
     if choice == "Content-Based Filtering":
